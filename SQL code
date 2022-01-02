@@ -1,0 +1,34 @@
+CREATE OR REPLACE VIEW `bg-pipeline-project-337007.source.currency_exchange_rates_v`
+ OPTIONS(
+
+   friendly_name="fx_rates",
+   description="a view that represents exchange_rates table in columnar view",
+   labels=[("exchange_rates", "source")]
+ )
+ AS
+
+WITH object AS
+    (SELECT  
+        date(timestamp_seconds(CAST(JSON_EXTRACT(src, '$.timestamp') as int64))) as dt
+        , JSON_EXTRACT_SCALAR(src, '$.base') as base
+        , JSON_EXTRACT(src, '$.rates')       as rates
+    FROM `bg-pipeline-project-337007.source.currency_exchange_rates` er
+    WHERE DATE(_PARTITIONTIME) = current_date() 
+
+    AND
+    JSON_EXTRACT_SCALAR(src, '$.base') in  ('USD', 'GBP')
+)
+
+, data as (
+SELECT dt, base AS Base_currency,
+  REGEXP_EXTRACT_ALL(rates, r'"[^"]+":\d+\.?\d*') AS pair
+FROM object
+)
+, splits as (
+select dt, Base_currency, pair, SPLIT(pair, ':') positions 
+FROM data 
+CROSS JOIN UNNEST (pair) as pair
+)
+select distinct dt, Base_currency, pair,  positions[offset(0)] AS rate_currency,  cast(positions[offset(1)] as float64) AS rate
+FROM splits
+;
